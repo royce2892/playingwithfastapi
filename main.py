@@ -1,16 +1,62 @@
 from enum import Enum
-from typing import Union, Annotated
+from typing import Union, Annotated, List, Any
 
-from fastapi import FastAPI, Query
-from pydantic import BaseModel
-
+from fastapi import FastAPI, Query, Body, Cookie, Header, status
+from fastapi.openapi.models import Response
+from pydantic import BaseModel, Field, HttpUrl, EmailStr
+from datetime import datetime, time, timedelta
+from uuid import UUID
+from fastapi.responses import JSONResponse, RedirectResponse
 app = FastAPI()
+
+
+class Image(BaseModel):
+    url: HttpUrl
+    name: str
 
 
 class Item(BaseModel):
     name: str
+    description: str | None = None
     price: float
-    is_offer: Union[bool, None] = None
+    tax: float | None = None
+    tags: set[str] = set()
+    images: list[Image] | None = None
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "name": "Foo",
+                    "description": "A very nice Item",
+                    "price": 35.4,
+                    "tax": 3.2,
+                    "tags": ["hello", "world"],
+                    "images": []
+                },
+                {
+                    "name": "Bar",
+                    "price": "35.4",
+                },
+                {
+                    "name": "Baz",
+                    "price": "thirty five point four",
+                }
+            ]
+        }
+    }
+
+
+class Offer(BaseModel):
+    name: str
+    description: str | None = None
+    price: float
+    items: list[Item]
+
+
+@app.post("/offers/")
+async def create_offer(offer: Offer):
+    return offer
 
 
 @app.get("/")
@@ -86,15 +132,9 @@ async def read_user_item(
     return item
 
 
-class Item(BaseModel):
-    name: str
-    description: str | None = None
-    price: float
-    tax: float | None = None
-
-
-@app.post("/items/")
+@app.post("/items/", response_model=Item)
 async def create_item(item: Item):
+    # return item
     item_dict = item.model_dump()
     if item.tax:
         price_with_tax = item.price + item.tax
@@ -116,3 +156,67 @@ async def read_items(q: Annotated[str | None, Query(max_length=50)] = None):
     if q:
         results.update({"q": q})
     return results
+
+
+class User(BaseModel):
+    username: str
+    full_name: str | None = None
+
+
+@app.put("/item-user/{item_id}")
+async def update_item(
+        item_id: int, item: Item, user: User, importance: Annotated[int, Body()]
+):
+    results = {"item_id": item_id, "item": item, "user": user, "importance": importance}
+    return results
+
+
+@app.post("/index-weights/")
+async def create_index_weights(weights: dict[int, float]):
+    return weights
+
+
+@app.put("/items-complex-datatypes/{item_id}")
+async def read_items_complex_datatypes(
+        item_id: UUID,
+        start_datetime: Annotated[datetime | None, Body()] = None,
+        end_datetime: Annotated[datetime | None, Body()] = None,
+        repeat_at: Annotated[time | None, Body()] = None,
+        process_after: Annotated[timedelta | None, Body()] = None,
+):
+    start_process = start_datetime + process_after
+    duration = end_datetime - start_process
+    return {
+        "item_id": item_id,
+        "start_datetime": start_datetime,
+        "end_datetime": end_datetime,
+        "repeat_at": repeat_at,
+        "process_after": process_after,
+        "start_process": start_process,
+        "duration": duration,
+    }
+
+
+class UserIn(BaseModel):
+    username: str
+    password: str
+    email: EmailStr
+    full_name: str | None = None
+
+
+class UserOut(BaseModel):
+    username: str
+    email: EmailStr
+    full_name: str | None = None
+
+
+@app.post("/user/", response_model=UserOut)
+async def create_user(user: UserIn) -> Any:
+    return user
+
+
+@app.get("/portal", status_code=status.HTTP_200_OK)
+async def get_portal(teleport: bool = False) -> Response:
+    if teleport:
+        return RedirectResponse(url="https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    return JSONResponse(content={"message": "Here's your interdimensional portal."})
